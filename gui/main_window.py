@@ -173,8 +173,10 @@ class MainWindow:
         selected = self.tree.selection()
         if selected:
             todo_id = int(selected[0])
-            self.controller.delete_todo(todo_id)
-            self._draw_tab_content(self.current_tab_id)
+            task_title = self.tree.item(selected[0], 'values')[1]
+            if messagebox.askyesno("Delete Task", f"Delete task '{task_title}'?"):
+                self.controller.delete_todo(todo_id)
+                self._draw_tab_content(self.current_tab_id)
 
     def _move_selected_task(self, tab_id, direction):
         selected = self.tree.selection()
