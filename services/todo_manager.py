@@ -160,6 +160,8 @@ class TodoManager:
             # Default behavior for top-level tasks and already-completed items.
             now_str = _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
             self.conn.execute('UPDATE todos SET completed=1, completed_at=? WHERE id=?', (now_str, todo_id))
+            self._merge_duplicate_completed_parents(row['tab_id'])
+            self._normalize_positions(row['tab_id'], 1)
         logger.info(f'Todo marked completed: {todo_id}')
 
     def _get_todo_row_with_title(self, todo_id: int):
@@ -246,6 +248,31 @@ class TodoManager:
             self.conn.execute('DELETE FROM todos WHERE tab_id=? AND completed=1', (tab_id,))
         logger.info(f'Completed todos cleared from tab {tab_id}')
 
+    def _merge_duplicate_completed_parents(self, tab_id: int):
+        """Merge completed top-level rows that share the same title and date into one row."""
+        cur = self.conn.cursor()
+        cur.execute(
+            '''
+            SELECT id, title, SUBSTR(COALESCE(completed_at, ''), 1, 10) AS date_key
+            FROM todos
+            WHERE tab_id=? AND completed=1 AND parent_id IS NULL
+            ORDER BY id ASC
+            ''',
+            (tab_id,)
+        )
+        seen = {}
+        for row_id, title, date_key in cur.fetchall():
+            key = (title, date_key)
+            if key not in seen:
+                seen[key] = row_id
+            else:
+                canonical_id = seen[key]
+                self.conn.execute(
+                    'UPDATE todos SET parent_id=? WHERE parent_id=?',
+                    (canonical_id, row_id)
+                )
+                self.conn.execute('DELETE FROM todos WHERE id=?', (row_id,))
+
     def shift_completed_date(self, todo_id: int, day_delta: int):
         with self.conn:
             cur = self.conn.cursor()
@@ -298,9 +325,11 @@ class TodoManager:
                     (new_ts, todo_id)
                 )
 
+            self._merge_duplicate_completed_parents(tab_id)
             self._normalize_positions(tab_id, 1)
         logger.info(f'Completed date shifted: todo_id={todo_id}, day_delta={day_delta}')
         return True
+
 
     def move_todo_hierarchy(self, todo_id: int, direction: int):
         """
