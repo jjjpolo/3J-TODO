@@ -126,3 +126,6 @@ venv.bak/
 
 # Cython debug symbols
 cython_debug/
+
+# SQLite database files
+*.db
