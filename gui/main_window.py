@@ -10,6 +10,8 @@ class MainWindow:
         self.tabs = {}
         self.current_tab_id = None
         self.show_completed = False
+        # Pre-create clear_completed_btn to avoid AttributeError
+        self.clear_completed_btn = None
         self._setup_ui()
         self._center_window()
 
@@ -35,9 +37,14 @@ class MainWindow:
         del_tab_btn = tk.Button(tab_btn_frame, text="Delete Tab", command=self._delete_current_tab)
         del_tab_btn.pack(side='left', padx=2)
 
-        # History toggle
-        self.history_btn = tk.Button(self.root, text="See history", command=self._toggle_history)
-        self.history_btn.pack(side='top', pady=2)
+        # History toggle and Clear Completed in a frame
+        top_action_frame = tk.Frame(self.root)
+        top_action_frame.pack(side='top', pady=2)
+        self.history_btn = tk.Button(top_action_frame, text="See history", command=self._toggle_history)
+        self.history_btn.pack(side='left', padx=2)
+        self.clear_completed_btn = tk.Button(top_action_frame, text="Clear Completed", command=self._clear_completed_top)
+        self.clear_completed_btn.pack(side='left', padx=2)
+        self.clear_completed_btn.pack_forget()  # Hide by default
     def _delete_current_tab(self):
         if len(self.tabs) <= 1:
             messagebox.showinfo("Delete Tab", "At least one tab must remain.")
@@ -108,7 +115,10 @@ class MainWindow:
         columns = ("completed", "title", "position")
         self.tree = ttk.Treeview(frame, columns=columns, show="headings", selectmode="browse", height=10)
         self.tree.heading("completed", text="Done")
-        self.tree.heading("title", text="Task")
+        if self.show_completed:
+            self.tree.heading("title", text="Completed task")
+        else:
+            self.tree.heading("title", text="Task")
         self.tree.heading("position", text="Pos")
         self.tree.column("completed", width=60, anchor="center")
         self.tree.column("title", width=250)
@@ -146,10 +156,16 @@ class MainWindow:
         del_btn.pack(side='left', padx=2)
         tk.Label(btn_frame).pack(side='left', expand=True)  # right spacer
 
-        # Clear completed button (if showing history)
-        if self.show_completed:
-            clear_btn = tk.Button(frame, text="Clear Completed", command=lambda: self._clear_completed(tab_id))
-            clear_btn.pack(side='top', pady=2)
+        # Show or hide the top clear completed button
+        if self.clear_completed_btn:
+            if self.show_completed:
+                self.clear_completed_btn.pack(side='left', padx=2)
+            else:
+                self.clear_completed_btn.pack_forget()
+
+    def _clear_completed_top(self):
+        if self.current_tab_id is not None:
+            self._clear_completed(self.current_tab_id)
 
     def _delete_selected_task(self):
         selected = self.tree.selection()
