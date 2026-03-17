@@ -272,9 +272,9 @@ class TodoManager:
             return True
 
         # direction > 0
-        # If last subtask moves down, promote to end of top-level list; else swap with next sibling.
+        # If last subtask moves down, promote to top-level right after parent; else swap with next sibling.
         if idx == len(siblings) - 1:
-            return self._promote_subtask_to_end(row)
+            return self._promote_subtask(row, before_parent=False)
         next_id, next_pos = siblings[idx + 1]
         self.conn.execute('UPDATE todos SET position=? WHERE id=?', (next_pos, row['id']))
         self.conn.execute('UPDATE todos SET position=? WHERE id=?', (row['position'], next_id))
