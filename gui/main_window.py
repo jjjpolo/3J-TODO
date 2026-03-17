@@ -89,7 +89,8 @@ class MainWindow:
             self._add_tab(tab_id, name)
         if not self.tabs:
             self.controller.add_tab("Personal")
-            self._add_tab_dialog(refresh=False)
+            for tab_id, name in self.controller.get_tabs():
+                self._add_tab(tab_id, name)
 
     def _add_tab(self, tab_id, name):
         frame = tk.Frame(self.tab_control)
