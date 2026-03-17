@@ -199,10 +199,9 @@ class MainWindow:
         title = entry.get().strip()
         if title:
             self.controller.add_todo(title, tab_id)
-            entry.delete(0, 'end')
+            # Do not call entry.focus_set() here, as the widget will be destroyed
+            # entry.delete(0, 'end') is also unnecessary since the redraw will create a new entry
             self._draw_tab_content(tab_id)
-            # Refocus entry after adding
-            entry.focus_set()
 
     def _toggle_complete(self, todo_id, var):
         if var.get():
