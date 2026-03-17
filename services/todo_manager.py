@@ -375,15 +375,15 @@ class TodoManager:
             return False
         new_parent_id = nxt[0]
 
-        cur.execute(
-            'SELECT COALESCE(MAX(position), 0) + 1 FROM todos WHERE parent_id=? AND completed=?',
+        # Shift existing subtasks down to make room at position 1.
+        self.conn.execute(
+            'UPDATE todos SET position = position + 1 WHERE parent_id=? AND completed=?',
             (new_parent_id, row['completed'])
         )
-        new_pos = cur.fetchone()[0]
 
         self.conn.execute(
-            'UPDATE todos SET parent_id=?, position=? WHERE id=?',
-            (new_parent_id, new_pos, row['id'])
+            'UPDATE todos SET parent_id=?, position=1 WHERE id=?',
+            (new_parent_id, row['id'])
         )
         return True
 

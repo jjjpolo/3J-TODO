@@ -259,15 +259,26 @@ class MainWindow:
             self.controller.mark_completed(todo_id)
             self._draw_tab_content(self.current_tab_id)
 
+    def _get_visible_tree_items(self, tree, parent=''):
+        """Return all currently visible items in tree order (respects expand state)."""
+        result = []
+        for item in tree.get_children(parent):
+            result.append(item)
+            if tree.item(item, 'open'):
+                result.extend(self._get_visible_tree_items(tree, item))
+        return result
+
     def _on_tree_up_down(self, event):
         tree = self._current_tree
         selected = tree.selection()
-        all_items = tree.get_children()
+        all_items = self._get_visible_tree_items(tree)
         if not all_items:
             return
         if not selected:
             tree.selection_set(all_items[0])
             tree.focus_set()
+            return
+        if selected[0] not in all_items:
             return
         idx = all_items.index(selected[0])
         if event.keysym == "Up" and idx > 0:
