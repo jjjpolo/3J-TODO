@@ -145,6 +145,8 @@ class MainWindow:
                     self.controller.mark_completed(todo_id)
                     self._draw_tab_content(tab_id)
         self.tree.bind("<Double-1>", on_double_click)
+        # Bind Delete (Supr) key to delete selected task
+        self.tree.bind("<Delete>", lambda event: self._delete_selected_task())
 
         # Delete and Move Up/Down buttons on same line
         btn_frame = tk.Frame(frame)
