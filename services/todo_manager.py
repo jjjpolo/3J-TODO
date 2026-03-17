@@ -1,6 +1,7 @@
 
 import sqlite3
 import os
+import datetime as _dt
 from models.todo import Todo
 from services.logger import logger
 
@@ -36,6 +37,7 @@ class TodoManager:
                     tab_id INTEGER,
                     parent_id INTEGER,
                     position INTEGER,
+                    completed_at TEXT,
                     FOREIGN KEY(tab_id) REFERENCES tabs(id),
                     FOREIGN KEY(parent_id) REFERENCES todos(id)
                 )
@@ -45,6 +47,8 @@ class TodoManager:
             columns = [row[1] for row in cur.fetchall()]
             if 'parent_id' not in columns:
                 self.conn.execute('ALTER TABLE todos ADD COLUMN parent_id INTEGER')
+            if 'completed_at' not in columns:
+                self.conn.execute('ALTER TABLE todos ADD COLUMN completed_at TEXT')
         logger.debug('Tables ensured in SQLite DB.')
 
     def add_tab(self, name: str):
@@ -87,13 +91,13 @@ class TodoManager:
     def get_todos_with_subtasks(self, tab_id: int, completed: bool = False):
         cur = self.conn.cursor()
         cur.execute(
-            'SELECT id, title, completed, position FROM todos WHERE tab_id=? AND completed=? AND parent_id IS NULL ORDER BY position',
+            'SELECT id, title, completed, position, completed_at FROM todos WHERE tab_id=? AND completed=? AND parent_id IS NULL ORDER BY position',
             (tab_id, int(completed))
         )
         parent_rows = cur.fetchall()
 
         cur.execute(
-            'SELECT id, title, completed, position, parent_id FROM todos WHERE tab_id=? AND completed=? AND parent_id IS NOT NULL ORDER BY parent_id, position',
+            'SELECT id, title, completed, position, parent_id, completed_at FROM todos WHERE tab_id=? AND completed=? AND parent_id IS NOT NULL ORDER BY parent_id, position',
             (tab_id, int(completed))
         )
         sub_rows = cur.fetchall()
@@ -101,12 +105,12 @@ class TodoManager:
         parent_map = {}
         parents = []
         for row in parent_rows:
-            todo = Todo(row[1], bool(row[2]), row[3], None, row[0])
+            todo = Todo(row[1], bool(row[2]), row[3], None, row[0], completed_at=row[4])
             parent_map[row[0]] = todo
             parents.append(todo)
 
         for row in sub_rows:
-            sub = Todo(row[1], bool(row[2]), row[3], row[4], row[0])
+            sub = Todo(row[1], bool(row[2]), row[3], row[4], row[0], completed_at=row[5])
             parent = parent_map.get(row[4])
             if parent:
                 parent.add_subtask(sub)
@@ -124,7 +128,8 @@ class TodoManager:
                 parent = self._get_todo_row_with_title(row['parent_id'])
                 if not parent:
                     # Fallback: mark completed in place if parent is missing.
-                    self.conn.execute('UPDATE todos SET completed=1 WHERE id=?', (todo_id,))
+                    now_str = _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                    self.conn.execute('UPDATE todos SET completed=1, completed_at=? WHERE id=?', (now_str, todo_id))
                     logger.info(f'Subtask marked completed without parent fallback: {todo_id}')
                     return
 
@@ -140,8 +145,8 @@ class TodoManager:
                 new_pos = cur.fetchone()[0]
 
                 self.conn.execute(
-                    'UPDATE todos SET completed=1, parent_id=?, position=? WHERE id=?',
-                    (completed_parent_id, new_pos, todo_id)
+                    'UPDATE todos SET completed=1, completed_at=?, parent_id=?, position=? WHERE id=?',
+                    (_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), completed_parent_id, new_pos, todo_id)
                 )
                 logger.info(
                     f'Subtask marked completed and moved under completed parent: subtask={todo_id}, completed_parent={completed_parent_id}'
@@ -149,7 +154,8 @@ class TodoManager:
                 return
 
             # Default behavior for top-level tasks and already-completed items.
-            self.conn.execute('UPDATE todos SET completed=1 WHERE id=?', (todo_id,))
+            now_str = _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+            self.conn.execute('UPDATE todos SET completed=1, completed_at=? WHERE id=?', (now_str, todo_id))
         logger.info(f'Todo marked completed: {todo_id}')
 
     def _get_todo_row_with_title(self, todo_id: int):
@@ -190,8 +196,8 @@ class TodoManager:
         )
         new_pos = cur.fetchone()[0]
         cur.execute(
-            'INSERT INTO todos (title, completed, tab_id, parent_id, position) VALUES (?, 1, ?, NULL, ?)',
-            (parent_title, tab_id, new_pos)
+            'INSERT INTO todos (title, completed, tab_id, parent_id, position, completed_at) VALUES (?, 1, ?, NULL, ?, ?)',
+            (parent_title, tab_id, new_pos, _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
         )
         return cur.lastrowid
 

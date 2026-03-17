@@ -148,8 +148,8 @@ class MainWindow:
             self._expanded_tasks = set()
 
         def insert_task_with_subtasks(todo, parent=""):
-            # Top-level tasks follow persisted open-state via tree disclosure.
-            is_parent_task = parent == ""
+            # is_parent_task is True when the todo has no DB parent (top-level or under a date header in history).
+            is_parent_task = getattr(todo, 'parent_id', None) is None
             expanded = is_parent_task and (todo.id in self._expanded_tasks)
             expand_icon = ""
             checkbox = "☑" if todo.completed else "☐"
@@ -160,15 +160,16 @@ class MainWindow:
             if is_parent_task:
                 for sub in sorted(getattr(todo, 'subtasks', []), key=lambda t: t.position):
                     insert_task_with_subtasks(sub, parent=str(todo.id))
-                # Inline subtask input row (visible when parent is open).
-                new_iid = self._new_subtask_iid(todo.id)
-                self.tree.insert(
-                    str(todo.id),
-                    "end",
-                    iid=new_iid,
-                    text="",
-                    values=("", "", "")
-                )
+                # Inline subtask input row only in active (non-history) mode.
+                if not self.show_completed:
+                    new_iid = self._new_subtask_iid(todo.id)
+                    self.tree.insert(
+                        str(todo.id),
+                        "end",
+                        iid=new_iid,
+                        text="",
+                        values=("", "", "")
+                    )
 
         # Get all top-level tasks; fallback to flat tasks when subtask API is not available yet.
         if hasattr(self.controller, 'get_todos_with_subtasks'):
@@ -190,8 +191,38 @@ class MainWindow:
             new_parents = parent_ids - existing_open
             self._expanded_tasks = existing_open | new_parents
 
-        for todo in sorted(todos, key=lambda t: t.position):
-            insert_task_with_subtasks(todo)
+        self.tree.tag_configure("date_header", background="#dde8f0", font=("TkDefaultFont", 9, "bold"))
+
+        if self.show_completed:
+            import datetime as _dt
+            today = _dt.date.today()
+
+            def _date_label(date_str):
+                if not date_str:
+                    return "Older"
+                try:
+                    d = _dt.date.fromisoformat(date_str[:10])
+                    if d == today:
+                        return f"Today  ·  {d.strftime('%B %d, %Y')}"
+                    if d == today - _dt.timedelta(days=1):
+                        return f"Yesterday  ·  {d.strftime('%B %d, %Y')}"
+                    return d.strftime('%B %d, %Y')
+                except ValueError:
+                    return "Older"
+
+            todos_sorted = sorted(todos, key=lambda t: getattr(t, 'completed_at', None) or "", reverse=True)
+            current_date_str = None
+            for todo in todos_sorted:
+                date_str = (getattr(todo, 'completed_at', None) or "")[:10]
+                if date_str != current_date_str:
+                    current_date_str = date_str
+                    header_iid = f"date:{date_str or 'none'}"
+                    self.tree.insert("", "end", iid=header_iid, text=_date_label(date_str),
+                                     values=("", "", ""), open=True, tags=("date_header",))
+                insert_task_with_subtasks(todo, parent=f"date:{date_str or 'none'}")
+        else:
+            for todo in sorted(todos, key=lambda t: t.position):
+                insert_task_with_subtasks(todo)
 
         self.tree.pack(side="top", fill="x", padx=5, pady=5)
         self._current_tree = self.tree
@@ -271,7 +302,7 @@ class MainWindow:
     def _on_tree_up_down(self, event):
         tree = self._current_tree
         selected = tree.selection()
-        all_items = self._get_visible_tree_items(tree)
+        all_items = [i for i in self._get_visible_tree_items(tree) if not i.startswith("date:")]
         if not all_items:
             return
         if not selected:
