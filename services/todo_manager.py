@@ -291,6 +291,18 @@ class TodoManager:
             except ValueError:
                 base_dt = _dt.datetime.now()
 
+            # In history, subtasks are displayed under parent date groups.
+            # Use the current parent's date as the base so first shift is exactly +/- 1 visible day.
+            if parent_id is not None:
+                cur.execute('SELECT completed_at FROM todos WHERE id=?', (parent_id,))
+                parent_date_row = cur.fetchone()
+                parent_completed_at = parent_date_row[0] if parent_date_row else None
+                if parent_completed_at:
+                    try:
+                        base_dt = _dt.datetime.fromisoformat(parent_completed_at)
+                    except ValueError:
+                        pass
+
             new_dt = base_dt + _dt.timedelta(days=day_delta)
             new_ts = new_dt.strftime('%Y-%m-%d %H:%M:%S')
 
