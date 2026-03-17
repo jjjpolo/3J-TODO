@@ -137,12 +137,14 @@ class MainWindow:
         # Delete and Move Up/Down buttons on same line
         btn_frame = tk.Frame(frame)
         btn_frame.pack(side='top', fill='x', pady=2)
+        tk.Label(btn_frame).pack(side='left', expand=True)  # left spacer
         up_btn = tk.Button(btn_frame, text="Move Up", command=lambda: self._move_selected_task(tab_id, -1))
         up_btn.pack(side='left', padx=2)
         down_btn = tk.Button(btn_frame, text="Move Down", command=lambda: self._move_selected_task(tab_id, 1))
         down_btn.pack(side='left', padx=2)
         del_btn = tk.Button(btn_frame, text="Delete Selected", command=lambda: self._delete_selected_task())
         del_btn.pack(side='left', padx=2)
+        tk.Label(btn_frame).pack(side='left', expand=True)  # right spacer
 
         # Clear completed button (if showing history)
         if self.show_completed:
