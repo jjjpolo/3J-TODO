@@ -44,6 +44,8 @@ class MainWindow:
         self.expand_btn.pack(side='left', padx=2)
         self.collapse_btn = tk.Button(action_btn_frame, text="Collapse", command=lambda: self._toggle_expand_selected(expand=False))
         self.collapse_btn.pack(side='left', padx=2)
+        self.expand_btn.config(state='disabled')
+        self.collapse_btn.config(state='disabled')
         self.mark_done_btn = tk.Button(action_btn_frame, text="Mark Done", command=self._mark_selected_done)
         self.mark_done_btn.pack(side='left', padx=2)
 
@@ -152,10 +154,10 @@ class MainWindow:
             self._expanded_tasks = set()
 
         def insert_task_with_subtasks(todo, parent=""):
-            # Top-level tasks are always expandable to allow inline subtask input.
+            # Top-level tasks are always expanded.
             is_parent_task = parent == ""
-            expanded = todo.id in self._expanded_tasks
-            expand_icon = "-" if is_parent_task and expanded else ("+" if is_parent_task else "")
+            expanded = is_parent_task
+            expand_icon = ""
             checkbox = "☑" if todo.completed else "☐"
             sub_count = len(getattr(todo, 'subtasks', [])) if is_parent_task else 0
             base_title = f"{todo.title} ({sub_count})" if is_parent_task and sub_count > 0 else todo.title
@@ -191,22 +193,8 @@ class MainWindow:
 
         # Bind expand/collapse on expand column click
         def on_tree_click(event):
-            region = self.tree.identify("region", event.x, event.y)
             # Keep focus behavior for normal clicks.
             self.tree.focus_set()
-            if region == "cell":
-                col = self.tree.identify_column(event.x)
-                if col == "#3":  # expand column
-                    item = self.tree.identify_row(event.y)
-                    if item:
-                        todo_id = self._todo_id_from_iid(item)
-                        if todo_id is None:
-                            return
-                        if todo_id in self._expanded_tasks:
-                            self._expanded_tasks.remove(todo_id)
-                        else:
-                            self._expanded_tasks.add(todo_id)
-                        self._draw_tab_content(tab_id)
         self.tree.bind("<Button-1>", on_tree_click)
 
         # Double-click behavior: expand/collapse parent task or activate inline subtask input.
@@ -221,18 +209,6 @@ class MainWindow:
                 if parent_id is not None:
                     self._show_subtask_inline_entry(item, parent_id)
                 return
-
-            # Parent task toggles expand/collapse on double-click.
-            parent = self.tree.parent(item)
-            if parent == "":
-                todo_id = self._todo_id_from_iid(item)
-                if todo_id is None:
-                    return
-                if todo_id in self._expanded_tasks:
-                    self._expanded_tasks.remove(todo_id)
-                else:
-                    self._expanded_tasks.add(todo_id)
-                self._draw_tab_content(tab_id)
         self.tree.bind("<Double-1>", on_double_click)
         # Bind Delete (Supr) key to delete selected task
         self.tree.bind("<Delete>", lambda event: self._delete_selected_task())
@@ -262,30 +238,8 @@ class MainWindow:
             self._draw_tab_content(self.current_tab_id)
 
     def _toggle_expand_selected(self, expand=None):
-        if not self._current_tree:
-            return
-        selected = self._current_tree.selection()
-        if not selected:
-            return
-        values = self._current_tree.item(selected[0], "values")
-        # If row has no expand icon, it has no subtasks.
-        if not values or values[2] == "":
-            return
-        todo_id = self._todo_id_from_iid(selected[0])
-        if todo_id is None:
-            return
-        if not hasattr(self, '_expanded_tasks'):
-            self._expanded_tasks = set()
-        if expand is True:
-            self._expanded_tasks.add(todo_id)
-        elif expand is False:
-            self._expanded_tasks.discard(todo_id)
-        else:
-            if todo_id in self._expanded_tasks:
-                self._expanded_tasks.remove(todo_id)
-            else:
-                self._expanded_tasks.add(todo_id)
-        self._draw_tab_content(self.current_tab_id)
+        # Expand/collapse is disabled: tree is always expanded.
+        return
 
     def _on_tree_up_down(self, event):
         tree = self._current_tree
