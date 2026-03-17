@@ -3,11 +3,13 @@ import tkinter as tk
 from tkinter import ttk, simpledialog, messagebox
 from types import SimpleNamespace
 
+VERSION = "1.0.0"
+
 class MainWindow:
     def __init__(self, controller):
         self.controller = controller
         self.root = tk.Tk()
-        self.root.title("3J TODO App")
+        self.root.title(f"3J TODO App v{VERSION}")
         self.tabs = {}
         self.current_tab_id = None
         self.show_completed = False
