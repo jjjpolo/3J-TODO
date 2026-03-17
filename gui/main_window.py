@@ -184,35 +184,34 @@ class MainWindow:
         if selected:
             todo_id = int(selected[0])
             task_title = self.tree.item(selected[0], 'values')[1]
-            if messagebox.askyesno("Delete Task", f"Delete task '{task_title}'?"):
-                # Find which item should be selected after deletion
-                all_items = self.tree.get_children()
-                idx = all_items.index(selected[0]) if selected[0] in all_items else 0
-                next_focus = None
-                if len(all_items) > 1:
-                    if idx == 0:
-                        next_focus = all_items[1]
+            # Find which item should be selected after deletion
+            all_items = self.tree.get_children()
+            idx = all_items.index(selected[0]) if selected[0] in all_items else 0
+            next_focus = None
+            if len(all_items) > 1:
+                if idx == 0:
+                    next_focus = all_items[1]
+                else:
+                    next_focus = all_items[idx-1]
+            self.controller.delete_todo(todo_id)
+            self._draw_tab_content(self.current_tab_id)
+            # After redraw, focus logic:
+            if not self.show_completed:
+                # If there are still items, select and focus the right one
+                tree = self._current_tree
+                if tree and tree.get_children():
+                    if next_focus and next_focus in tree.get_children():
+                        tree.selection_set(next_focus)
+                        tree.focus_set()
                     else:
-                        next_focus = all_items[idx-1]
-                self.controller.delete_todo(todo_id)
-                self._draw_tab_content(self.current_tab_id)
-                # After redraw, focus logic:
-                if not self.show_completed:
-                    # If there are still items, select and focus the right one
-                    tree = self._current_tree
-                    if tree and tree.get_children():
-                        if next_focus and next_focus in tree.get_children():
-                            tree.selection_set(next_focus)
-                            tree.focus_set()
-                        else:
-                            # Default to first item
-                            first = tree.get_children()[0]
-                            tree.selection_set(first)
-                            tree.focus_set()
-                    else:
-                        # No items left, focus entry
-                        if self._current_entry:
-                            self._current_entry.focus_set()
+                        # Default to first item
+                        first = tree.get_children()[0]
+                        tree.selection_set(first)
+                        tree.focus_set()
+                else:
+                    # No items left, focus entry
+                    if self._current_entry:
+                        self._current_entry.focus_set()
 
     def _move_selected_task(self, tab_id, direction):
         selected = self.tree.selection()
@@ -230,8 +229,12 @@ class MainWindow:
             self.controller.reorder_todos(tab_id, order)
             # Redraw and reselect the moved item
             self._draw_tab_content(tab_id)
-            # Reselect the moved item
-            self.tree.selection_set(str(order[new_idx]))
+            # Reselect and refocus the moved item
+            moved_id = str(order[new_idx])
+            tree = self._current_tree
+            if tree and moved_id in tree.get_children():
+                tree.selection_set(moved_id)
+                tree.focus_set()
 
     def _add_task(self, entry, tab_id):
         title = entry.get().strip()
