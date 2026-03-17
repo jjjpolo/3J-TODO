@@ -1,7 +1,8 @@
 
 import tkinter as tk
-from tkinter import ttk, simpledialog, messagebox
+from tkinter import ttk, simpledialog, messagebox, filedialog
 from types import SimpleNamespace
+import datetime as _dt
 
 VERSION = "1.0.0"
 
@@ -61,16 +62,21 @@ class MainWindow:
         
         self.clear_completed_btn = tk.Button(top_action_frame, text="Clear Completed", command=self._clear_completed_top)
         self.clear_completed_btn.pack(side='left', padx=2)
-        self.clear_completed_btn.pack_forget()  # Hide by default
+        self.export_history_btn = tk.Button(top_action_frame, text="Export", command=self._export_history)
+        self.export_history_btn.pack(side='left', padx=2)
         self._update_action_buttons_for_view()
 
     def _update_action_buttons_for_view(self):
         if self.show_completed:
             self.move_up_btn.config(text="Increase Date")
             self.move_down_btn.config(text="Decrease Date")
+            self.clear_completed_btn.pack(side='left', padx=2)
+            self.export_history_btn.pack(side='left', padx=2)
         else:
             self.move_up_btn.config(text="Move Up")
             self.move_down_btn.config(text="Move Down")
+            self.clear_completed_btn.pack_forget()
+            self.export_history_btn.pack_forget()
     def _delete_current_tab(self):
         if len(self.tabs) <= 1:
             messagebox.showinfo("Delete Tab", "At least one tab must remain.")
@@ -291,16 +297,38 @@ class MainWindow:
     def _mark_selected_done(self):
         if not self._current_tree:
             return
-        selected = self._current_tree.selection()
+        tree = self._current_tree
+        selected = tree.selection()
         if not selected:
             return
         todo_id = self._todo_id_from_iid(selected[0])
         if todo_id is None:
             return
-        values = self._current_tree.item(selected[0], "values")
+        # Capture current selectable order so we can restore nearest selection after redraw.
+        before_items = [
+            iid for iid in self._get_visible_tree_items(tree)
+            if self._todo_id_from_iid(iid) is not None and not self._is_new_subtask_iid(iid)
+        ]
+        current_idx = before_items.index(selected[0]) if selected[0] in before_items else 0
+
+        values = tree.item(selected[0], "values")
         if values and values[0] == "☐":
             self.controller.mark_completed(todo_id)
             self._draw_tab_content(self.current_tab_id)
+
+            # Keep user in keyboard flow: focus tree and select closest remaining item.
+            tree = self._current_tree
+            if not tree:
+                return
+            after_items = [
+                iid for iid in self._get_visible_tree_items(tree)
+                if self._todo_id_from_iid(iid) is not None and not self._is_new_subtask_iid(iid)
+            ]
+            if not after_items:
+                return
+            next_idx = min(current_idx, len(after_items) - 1)
+            tree.selection_set(after_items[next_idx])
+            tree.focus_set()
 
     def _get_visible_tree_items(self, tree, parent=''):
         """Return all currently visible items in tree order (respects expand state)."""
@@ -346,13 +374,6 @@ class MainWindow:
             self._move_selected_task(self.current_tab_id, 1)
         elif event.keysym == "Prior":
             self._move_selected_task(self.current_tab_id, -1)
-
-        # Show or hide the top clear completed button
-        if self.clear_completed_btn:
-            if self.show_completed:
-                self.clear_completed_btn.pack(side='left', padx=2)
-            else:
-                self.clear_completed_btn.pack_forget()
 
     def _clear_completed_top(self):
         if self.current_tab_id is not None:
@@ -535,6 +556,93 @@ class MainWindow:
     def _clear_completed(self, tab_id):
         self.controller.clear_completed(tab_id)
         self._draw_tab_content(tab_id)
+
+    def _history_date_label(self, date_str):
+        if not date_str:
+            return "Older"
+        try:
+            d = _dt.date.fromisoformat(date_str[:10])
+            today = _dt.date.today()
+            if d == today:
+                return f"Today - {d.strftime('%B %d, %Y')}"
+            if d == today - _dt.timedelta(days=1):
+                return f"Yesterday - {d.strftime('%B %d, %Y')}"
+            return d.strftime('%B %d, %Y')
+        except ValueError:
+            return "Older"
+
+    def _selected_history_date_key(self):
+        if not self._current_tree:
+            return None
+        selected = self._current_tree.selection()
+        if not selected:
+            return None
+
+        item = selected[0]
+        while item:
+            if item.startswith('date:'):
+                key = item.split(':', 1)[1]
+                return '' if key == 'none' else key
+            item = self._current_tree.parent(item)
+        return None
+
+    def _export_history(self):
+        if not self.show_completed or self.current_tab_id is None:
+            messagebox.showinfo("Export", "Export is available only in history view.")
+            return
+
+        if hasattr(self.controller, 'get_todos_with_subtasks'):
+            todos = self.controller.get_todos_with_subtasks(self.current_tab_id, completed=True)
+        else:
+            todos = []
+
+        if not todos:
+            messagebox.showinfo("Export", "No completed items to export.")
+            return
+
+        selected_date_key = self._selected_history_date_key()
+
+        groups = {}
+        for todo in todos:
+            date_key = (getattr(todo, 'completed_at', None) or '')[:10]
+            if selected_date_key is not None and date_key != selected_date_key:
+                continue
+            groups.setdefault(date_key, []).append(todo)
+
+        if not groups:
+            messagebox.showinfo("Export", "No items found for the selected date group.")
+            return
+
+        lines = ["Daily Standup - What I Did", ""]
+        sorted_date_keys = sorted(groups.keys(), key=lambda k: (k == '', k), reverse=True)
+        for date_key in sorted_date_keys:
+            lines.append(f"{self._history_date_label(date_key)}:")
+            for parent in sorted(groups[date_key], key=lambda t: t.position):
+                lines.append(f"- {parent.title}")
+                for sub in sorted(getattr(parent, 'subtasks', []), key=lambda s: s.position):
+                    lines.append(f"  - {sub.title}")
+            lines.append("")
+
+        export_text = "\n".join(lines).strip()
+        scope = self._history_date_label(selected_date_key) if selected_date_key is not None else "all dates"
+        default_name = f"standup-{selected_date_key if selected_date_key else 'all'}.txt"
+        file_path = filedialog.asksaveasfilename(
+            title="Save standup export",
+            defaultextension=".txt",
+            initialfile=default_name,
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")]
+        )
+        if not file_path:
+            return
+
+        try:
+            with open(file_path, "w", encoding="utf-8") as f:
+                f.write(export_text)
+        except OSError as exc:
+            messagebox.showerror("Export", f"Could not save file:\n{exc}")
+            return
+
+        messagebox.showinfo("Export", f"History exported to file ({scope}).\n\n{file_path}")
 
     def _toggle_history(self):
         self.show_completed = not self.show_completed
