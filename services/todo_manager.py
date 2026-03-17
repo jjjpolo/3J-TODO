@@ -243,14 +243,41 @@ class TodoManager:
                 else:
                     moved = self._move_top_level_down(row)
             else:
-                if direction < 0:
-                    moved = self._promote_subtask(row, before_parent=True)
-                else:
-                    moved = self._promote_subtask(row, before_parent=False)
+                moved = self._move_subtask_within_or_promote(row, direction)
 
             if moved:
                 self._normalize_positions(row['tab_id'], row['completed'])
             return moved
+
+    def _move_subtask_within_or_promote(self, row, direction: int):
+        cur = self.conn.cursor()
+        cur.execute(
+            'SELECT id, position FROM todos WHERE parent_id=? AND completed=? ORDER BY position, id',
+            (row['parent_id'], row['completed'])
+        )
+        siblings = cur.fetchall()
+        ids = [r[0] for r in siblings]
+        if row['id'] not in ids:
+            return False
+
+        idx = ids.index(row['id'])
+        if direction < 0:
+            # If first subtask moves up, promote before parent; else swap with previous sibling.
+            if idx == 0:
+                return self._promote_subtask(row, before_parent=True)
+            prev_id, prev_pos = siblings[idx - 1]
+            self.conn.execute('UPDATE todos SET position=? WHERE id=?', (prev_pos, row['id']))
+            self.conn.execute('UPDATE todos SET position=? WHERE id=?', (row['position'], prev_id))
+            return True
+
+        # direction > 0
+        # If last subtask moves down, promote after parent; else swap with next sibling.
+        if idx == len(siblings) - 1:
+            return self._promote_subtask(row, before_parent=False)
+        next_id, next_pos = siblings[idx + 1]
+        self.conn.execute('UPDATE todos SET position=? WHERE id=?', (next_pos, row['id']))
+        self.conn.execute('UPDATE todos SET position=? WHERE id=?', (row['position'], next_id))
+        return True
 
     def _get_todo_row(self, todo_id: int):
         cur = self.conn.cursor()
