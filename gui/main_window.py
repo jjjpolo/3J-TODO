@@ -109,6 +109,8 @@ class MainWindow:
         add_btn.pack(side='left', padx=5)
         # Bind Enter key to add task
         entry.bind('<Return>', lambda event: self._add_task(entry, tab_id))
+        # Always focus the entry field after drawing
+        entry.focus_set()
 
         # Task list as table
         todos = self.controller.get_todos(tab_id, completed=self.show_completed)
@@ -199,6 +201,8 @@ class MainWindow:
             self.controller.add_todo(title, tab_id)
             entry.delete(0, 'end')
             self._draw_tab_content(tab_id)
+            # Refocus entry after adding
+            entry.focus_set()
 
     def _toggle_complete(self, todo_id, var):
         if var.get():
