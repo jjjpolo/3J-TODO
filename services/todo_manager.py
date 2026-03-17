@@ -228,9 +228,10 @@ class TodoManager:
         """
         Hierarchy-aware move:
         - Up on top-level task: becomes subtask of the top-level task above.
-        - Up on subtask: promoted to top-level at parent's position.
-        - Down on subtask: promoted to top-level after parent.
-        - Down on top-level task: regular top-level reorder down.
+        - Down on top-level task: becomes subtask of the next top-level task.
+        - Up/Down on subtask: reorders within same parent when possible.
+        - Up on first subtask: promoted to top-level before parent.
+        - Down on last subtask: promoted to end of top-level list.
         """
         with self.conn:
             row = self._get_todo_row(todo_id)
@@ -241,7 +242,7 @@ class TodoManager:
                 if direction < 0:
                     moved = self._demote_task_to_previous_parent(row)
                 else:
-                    moved = self._move_top_level_down(row)
+                    moved = self._demote_task_to_next_parent(row)
             else:
                 moved = self._move_subtask_within_or_promote(row, direction)
 
@@ -271,9 +272,9 @@ class TodoManager:
             return True
 
         # direction > 0
-        # If last subtask moves down, promote after parent; else swap with next sibling.
+        # If last subtask moves down, promote to end of top-level list; else swap with next sibling.
         if idx == len(siblings) - 1:
-            return self._promote_subtask(row, before_parent=False)
+            return self._promote_subtask_to_end(row)
         next_id, next_pos = siblings[idx + 1]
         self.conn.execute('UPDATE todos SET position=? WHERE id=?', (next_pos, row['id']))
         self.conn.execute('UPDATE todos SET position=? WHERE id=?', (row['position'], next_id))
@@ -346,11 +347,24 @@ class TodoManager:
         )
         return True
 
-    def _move_top_level_down(self, row):
+    def _promote_subtask_to_end(self, row):
+        cur = self.conn.cursor()
+        cur.execute(
+            'SELECT COALESCE(MAX(position), 0) + 1 FROM todos WHERE tab_id=? AND completed=? AND parent_id IS NULL',
+            (row['tab_id'], row['completed'])
+        )
+        end_pos = cur.fetchone()[0]
+        self.conn.execute(
+            'UPDATE todos SET parent_id=NULL, position=? WHERE id=?',
+            (end_pos, row['id'])
+        )
+        return True
+
+    def _demote_task_to_next_parent(self, row):
         cur = self.conn.cursor()
         cur.execute(
             '''
-            SELECT id, position FROM todos
+            SELECT id FROM todos
             WHERE tab_id=? AND completed=? AND parent_id IS NULL AND position > ?
             ORDER BY position ASC LIMIT 1
             ''',
@@ -359,9 +373,18 @@ class TodoManager:
         nxt = cur.fetchone()
         if not nxt:
             return False
-        next_id, next_pos = nxt
-        self.conn.execute('UPDATE todos SET position=? WHERE id=?', (next_pos, row['id']))
-        self.conn.execute('UPDATE todos SET position=? WHERE id=?', (row['position'], next_id))
+        new_parent_id = nxt[0]
+
+        cur.execute(
+            'SELECT COALESCE(MAX(position), 0) + 1 FROM todos WHERE parent_id=? AND completed=?',
+            (new_parent_id, row['completed'])
+        )
+        new_pos = cur.fetchone()[0]
+
+        self.conn.execute(
+            'UPDATE todos SET parent_id=?, position=? WHERE id=?',
+            (new_parent_id, new_pos, row['id'])
+        )
         return True
 
     def _normalize_positions(self, tab_id: int, completed: int):
