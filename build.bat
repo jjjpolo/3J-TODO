@@ -30,6 +30,7 @@ if exist main.spec del /q main.spec
 
 :: Build the executable
 echo Building executable...
+:: Keep config.json bundled as template so app can create runtime config.json next to EXE.
 pyinstaller ^
     --onefile ^
     --windowed ^

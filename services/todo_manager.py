@@ -4,14 +4,24 @@ import os
 import datetime as _dt
 from models.todo import Todo
 from services.logger import logger
+from services.app_paths import get_runtime_file
 
-DB_FILE = os.path.join(os.path.dirname(__file__), '../todo.db')
+DB_FILE = get_runtime_file('TODO.db')
+LEGACY_DB_FILE = get_runtime_file('todo.db')
+
+
+def _resolve_db_file() -> str:
+    if os.path.exists(DB_FILE):
+        return DB_FILE
+    if os.path.exists(LEGACY_DB_FILE):
+        return LEGACY_DB_FILE
+    return DB_FILE
 
 class TodoManager:
     """Handles todo operations and storage using SQLite."""
 
     def __init__(self):
-        self.conn = sqlite3.connect(DB_FILE)
+        self.conn = sqlite3.connect(_resolve_db_file())
         self._create_tables()
         logger.info('TodoManager initialized with SQLite DB.')
 
