@@ -48,3 +48,6 @@ class AppController:
 
     def clear_completed(self, tab_id):
         self.todo_manager.clear_completed(tab_id)
+
+    def shift_completed_date(self, todo_id, day_delta):
+        return self.todo_manager.shift_completed_date(todo_id, day_delta)

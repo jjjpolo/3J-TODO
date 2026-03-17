@@ -60,6 +60,15 @@ class MainWindow:
         self.clear_completed_btn = tk.Button(top_action_frame, text="Clear Completed", command=self._clear_completed_top)
         self.clear_completed_btn.pack(side='left', padx=2)
         self.clear_completed_btn.pack_forget()  # Hide by default
+        self._update_action_buttons_for_view()
+
+    def _update_action_buttons_for_view(self):
+        if self.show_completed:
+            self.move_up_btn.config(text="Increase Date")
+            self.move_down_btn.config(text="Decrease Date")
+        else:
+            self.move_up_btn.config(text="Move Up")
+            self.move_down_btn.config(text="Move Down")
     def _delete_current_tab(self):
         if len(self.tabs) <= 1:
             messagebox.showinfo("Delete Tab", "At least one tab must remain.")
@@ -323,6 +332,13 @@ class MainWindow:
         selected = tree.selection()
         if not selected:
             return
+        if self.show_completed:
+            # History mode: PageUp increases date by 1 day, PageDown decreases by 1 day.
+            if event.keysym == "Prior":
+                self._shift_selected_date(1)
+            elif event.keysym == "Next":
+                self._shift_selected_date(-1)
+            return "break"
         if event.keysym == "Next":
             self._move_selected_task(self.current_tab_id, 1)
         elif event.keysym == "Prior":
@@ -374,6 +390,12 @@ class MainWindow:
                             self._current_entry.focus_set()
 
     def _move_selected_task(self, tab_id, direction):
+        if self.show_completed:
+            # History mode replaces move up/down with date shifts.
+            day_delta = 1 if direction < 0 else -1
+            self._shift_selected_date(day_delta)
+            return
+
         selected = self.tree.selection()
         if not selected:
             return
@@ -410,6 +432,30 @@ class MainWindow:
             if tree and tree.exists(moved_id):
                 tree.selection_set(moved_id)
                 tree.focus_set()
+
+    def _shift_selected_date(self, day_delta):
+        selected = self.tree.selection()
+        if not selected:
+            return
+
+        selected_iid = selected[0]
+        todo_id = self._todo_id_from_iid(selected_iid)
+        if todo_id is None:
+            return
+
+        if not hasattr(self.controller, 'shift_completed_date'):
+            return
+
+        moved = self.controller.shift_completed_date(todo_id, day_delta)
+        if not moved:
+            return
+
+        self._draw_tab_content(self.current_tab_id)
+        tree = self._current_tree
+        moved_id = str(todo_id)
+        if tree and tree.exists(moved_id):
+            tree.selection_set(moved_id)
+            tree.focus_set()
 
     def _todo_id_from_iid(self, iid):
         try:
@@ -490,6 +536,7 @@ class MainWindow:
     def _toggle_history(self):
         self.show_completed = not self.show_completed
         self.history_btn.config(text="Hide history" if self.show_completed else "See history")
+        self._update_action_buttons_for_view()
         self._draw_tab_content(self.current_tab_id)
 
     def _move_task(self, tab_id, direction):

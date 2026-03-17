@@ -133,9 +133,13 @@ class TodoManager:
                     logger.info(f'Subtask marked completed without parent fallback: {todo_id}')
                     return
 
+                now_str = _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+                date_key = now_str[:10]
+
                 completed_parent_id = self._find_or_create_completed_parent_by_title(
                     tab_id=row['tab_id'],
-                    parent_title=parent['title']
+                    parent_title=parent['title'],
+                    date_key=date_key
                 )
 
                 cur = self.conn.execute(
@@ -146,7 +150,7 @@ class TodoManager:
 
                 self.conn.execute(
                     'UPDATE todos SET completed=1, completed_at=?, parent_id=?, position=? WHERE id=?',
-                    (_dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'), completed_parent_id, new_pos, todo_id)
+                    (now_str, completed_parent_id, new_pos, todo_id)
                 )
                 logger.info(
                     f'Subtask marked completed and moved under completed parent: subtask={todo_id}, completed_parent={completed_parent_id}'
@@ -176,16 +180,27 @@ class TodoManager:
             'title': r[5],
         }
 
-    def _find_or_create_completed_parent_by_title(self, tab_id: int, parent_title: str):
+    def _find_or_create_completed_parent_by_title(self, tab_id: int, parent_title: str, date_key: str = None):
         cur = self.conn.cursor()
-        cur.execute(
-            '''
-            SELECT id FROM todos
-            WHERE tab_id=? AND completed=1 AND parent_id IS NULL AND title=?
-            ORDER BY id ASC LIMIT 1
-            ''',
-            (tab_id, parent_title)
-        )
+        if date_key:
+            cur.execute(
+                '''
+                SELECT id FROM todos
+                WHERE tab_id=? AND completed=1 AND parent_id IS NULL AND title=?
+                  AND SUBSTR(COALESCE(completed_at, ''), 1, 10)=?
+                ORDER BY id ASC LIMIT 1
+                ''',
+                (tab_id, parent_title, date_key)
+            )
+        else:
+            cur.execute(
+                '''
+                SELECT id FROM todos
+                WHERE tab_id=? AND completed=1 AND parent_id IS NULL AND title=?
+                ORDER BY id ASC LIMIT 1
+                ''',
+                (tab_id, parent_title)
+            )
         found = cur.fetchone()
         if found:
             return found[0]
@@ -195,9 +210,10 @@ class TodoManager:
             (tab_id,)
         )
         new_pos = cur.fetchone()[0]
+        completed_at = f'{date_key} 00:00:00' if date_key else _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S')
         cur.execute(
             'INSERT INTO todos (title, completed, tab_id, parent_id, position, completed_at) VALUES (?, 1, ?, NULL, ?, ?)',
-            (parent_title, tab_id, new_pos, _dt.datetime.now().strftime('%Y-%m-%d %H:%M:%S'))
+            (parent_title, tab_id, new_pos, completed_at)
         )
         return cur.lastrowid
 
@@ -229,6 +245,62 @@ class TodoManager:
         with self.conn:
             self.conn.execute('DELETE FROM todos WHERE tab_id=? AND completed=1', (tab_id,))
         logger.info(f'Completed todos cleared from tab {tab_id}')
+
+    def shift_completed_date(self, todo_id: int, day_delta: int):
+        with self.conn:
+            cur = self.conn.cursor()
+            cur.execute('SELECT completed, completed_at, parent_id, tab_id FROM todos WHERE id=?', (todo_id,))
+            row = cur.fetchone()
+            if not row:
+                return False
+            if row[0] != 1:
+                return False
+
+            completed_at = row[1]
+            parent_id = row[2]
+            tab_id = row[3]
+            try:
+                base_dt = _dt.datetime.fromisoformat(completed_at) if completed_at else _dt.datetime.now()
+            except ValueError:
+                base_dt = _dt.datetime.now()
+
+            new_dt = base_dt + _dt.timedelta(days=day_delta)
+            new_ts = new_dt.strftime('%Y-%m-%d %H:%M:%S')
+
+            # If this is a subtask, move it to the completed parent bucket for the target day.
+            if parent_id is not None:
+                cur.execute('SELECT title FROM todos WHERE id=?', (parent_id,))
+                parent_row = cur.fetchone()
+                parent_title = parent_row[0] if parent_row else None
+                if parent_title:
+                    target_parent_id = self._find_or_create_completed_parent_by_title(
+                        tab_id=tab_id,
+                        parent_title=parent_title,
+                        date_key=new_ts[:10]
+                    )
+                    cur.execute(
+                        'SELECT COALESCE(MAX(position), 0) + 1 FROM todos WHERE parent_id=? AND completed=1',
+                        (target_parent_id,)
+                    )
+                    new_pos = cur.fetchone()[0]
+                    self.conn.execute(
+                        'UPDATE todos SET completed_at=?, parent_id=?, position=? WHERE id=?',
+                        (new_ts, target_parent_id, new_pos, todo_id)
+                    )
+                else:
+                    self.conn.execute(
+                        'UPDATE todos SET completed_at=? WHERE id=?',
+                        (new_ts, todo_id)
+                    )
+            else:
+                self.conn.execute(
+                    'UPDATE todos SET completed_at=? WHERE id=?',
+                    (new_ts, todo_id)
+                )
+
+            self._normalize_positions(tab_id, 1)
+        logger.info(f'Completed date shifted: todo_id={todo_id}, day_delta={day_delta}')
+        return True
 
     def move_todo_hierarchy(self, todo_id: int, direction: int):
         """
