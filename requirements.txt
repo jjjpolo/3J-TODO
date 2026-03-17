@@ -1,0 +1,11 @@
+# 3J TODO App — Python dependencies
+# All imports are from the Python standard library; no third-party packages are required.
+#
+# Standard library modules used:
+#   tkinter      — GUI framework
+#   sqlite3      — local database
+#   datetime     — completion date handling
+#   logging      — application logging
+#   json         — config file parsing
+#   os           — file path utilities
+#   types        — SimpleNamespace
