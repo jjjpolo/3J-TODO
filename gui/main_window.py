@@ -11,6 +11,15 @@ class MainWindow:
         self.current_tab_id = None
         self.show_completed = False
         self._setup_ui()
+        self._center_window()
+
+    def _center_window(self):
+        self.root.update_idletasks()
+        width = self.root.winfo_width()
+        height = self.root.winfo_height()
+        x = (self.root.winfo_screenwidth() // 2) - (width // 2)
+        y = (self.root.winfo_screenheight() // 2) - (height // 2)
+        self.root.geometry(f"{width}x{height}+{x}+{y}")
 
     def _setup_ui(self):
         # Tabs
