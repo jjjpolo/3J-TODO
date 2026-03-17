@@ -109,8 +109,11 @@ class MainWindow:
         add_btn.pack(side='left', padx=5)
         # Bind Enter key to add task
         entry.bind('<Return>', lambda event: self._add_task(entry, tab_id))
-        # Always focus the entry field after drawing
-        entry.focus_set()
+        # Focus entry only if not in history mode
+        if not self.show_completed:
+            entry.focus_set()
+        self._current_entry = entry
+        self._current_tree = None
 
         # Task list as table
         todos = self.controller.get_todos(tab_id, completed=self.show_completed)
@@ -133,6 +136,7 @@ class MainWindow:
 
 
         self.tree.pack(side="top", fill="x", padx=5, pady=5)
+        self._current_tree = self.tree
 
         # Double-click to toggle completion
         def on_double_click(event):
@@ -147,6 +151,10 @@ class MainWindow:
         self.tree.bind("<Double-1>", on_double_click)
         # Bind Delete (Supr) key to delete selected task
         self.tree.bind("<Delete>", lambda event: self._delete_selected_task())
+        # Focus stays on treeview when clicked or navigated
+        self.tree.bind("<Button-1>", lambda event: self.tree.focus_set())
+        self.tree.bind("<Up>", lambda event: self.tree.focus_set())
+        self.tree.bind("<Down>", lambda event: self.tree.focus_set())
 
         # Delete and Move Up/Down buttons on same line
         btn_frame = tk.Frame(frame)
@@ -177,8 +185,34 @@ class MainWindow:
             todo_id = int(selected[0])
             task_title = self.tree.item(selected[0], 'values')[1]
             if messagebox.askyesno("Delete Task", f"Delete task '{task_title}'?"):
+                # Find which item should be selected after deletion
+                all_items = self.tree.get_children()
+                idx = all_items.index(selected[0]) if selected[0] in all_items else 0
+                next_focus = None
+                if len(all_items) > 1:
+                    if idx == 0:
+                        next_focus = all_items[1]
+                    else:
+                        next_focus = all_items[idx-1]
                 self.controller.delete_todo(todo_id)
                 self._draw_tab_content(self.current_tab_id)
+                # After redraw, focus logic:
+                if not self.show_completed:
+                    # If there are still items, select and focus the right one
+                    tree = self._current_tree
+                    if tree and tree.get_children():
+                        if next_focus and next_focus in tree.get_children():
+                            tree.selection_set(next_focus)
+                            tree.focus_set()
+                        else:
+                            # Default to first item
+                            first = tree.get_children()[0]
+                            tree.selection_set(first)
+                            tree.focus_set()
+                    else:
+                        # No items left, focus entry
+                        if self._current_entry:
+                            self._current_entry.focus_set()
 
     def _move_selected_task(self, tab_id, direction):
         selected = self.tree.selection()
@@ -203,9 +237,10 @@ class MainWindow:
         title = entry.get().strip()
         if title:
             self.controller.add_todo(title, tab_id)
-            # Do not call entry.focus_set() here, as the widget will be destroyed
-            # entry.delete(0, 'end') is also unnecessary since the redraw will create a new entry
             self._draw_tab_content(tab_id)
+            # Refocus entry after adding if not in history mode
+            if not self.show_completed and self._current_entry:
+                self._current_entry.focus_set()
 
     def _toggle_complete(self, todo_id, var):
         if var.get():
