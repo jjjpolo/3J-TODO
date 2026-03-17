@@ -66,35 +66,87 @@ class MainWindow:
         for widget in frame.winfo_children():
             widget.destroy()
 
-        # Add task entry
-        entry = tk.Entry(frame)
-        entry.pack(side='top', fill='x', padx=5, pady=2)
-        add_btn = tk.Button(frame, text="Add Task", command=lambda: self._add_task(entry, tab_id))
-        add_btn.pack(side='top', pady=2)
+        # Add task entry and button on same line
+        entry_frame = tk.Frame(frame)
+        entry_frame.pack(side='top', fill='x', padx=5, pady=2)
+        entry = tk.Entry(entry_frame)
+        entry.pack(side='left', fill='x', expand=True)
+        add_btn = tk.Button(entry_frame, text="Add Task", command=lambda: self._add_task(entry, tab_id))
+        add_btn.pack(side='left', padx=5)
+        # Bind Enter key to add task
+        entry.bind('<Return>', lambda event: self._add_task(entry, tab_id))
 
-        # Task list
+        # Task list as table
         todos = self.controller.get_todos(tab_id, completed=self.show_completed)
-        self.todo_vars = {}
+        columns = ("completed", "title", "position")
+        self.tree = ttk.Treeview(frame, columns=columns, show="headings", selectmode="browse", height=10)
+        self.tree.heading("completed", text="Done")
+        self.tree.heading("title", text="Task")
+        self.tree.heading("position", text="Pos")
+        self.tree.column("completed", width=60, anchor="center")
+        self.tree.column("title", width=250)
+        self.tree.column("position", width=40, anchor="center")
+
+        # Insert tasks
         for todo_id, title, completed, position in todos:
-            var = tk.BooleanVar(value=bool(completed))
-            cb = tk.Checkbutton(frame, text=title, variable=var, command=lambda tid=todo_id, v=var: self._toggle_complete(tid, v))
-            cb.pack(anchor='w')
-            self.todo_vars[todo_id] = var
-            if not completed:
-                del_btn = tk.Button(frame, text="Delete", command=lambda tid=todo_id: self._delete_task(tid))
-                del_btn.pack(anchor='e')
+            checkbox = "☑" if completed else "☐"
+            self.tree.insert("", "end", iid=str(todo_id), values=(checkbox, title, position))
+
+
+        self.tree.pack(side="top", fill="x", padx=5, pady=5)
+
+        # Double-click to toggle completion
+        def on_double_click(event):
+            item = self.tree.identify_row(event.y)
+            if item:
+                todo_id = int(item)
+                # Only allow marking as completed if not already
+                values = self.tree.item(item, "values")
+                if values[0] == "☐":
+                    self.controller.mark_completed(todo_id)
+                    self._draw_tab_content(tab_id)
+        self.tree.bind("<Double-1>", on_double_click)
+
+        # Delete and Move Up/Down buttons on same line
+        btn_frame = tk.Frame(frame)
+        btn_frame.pack(side='top', fill='x', pady=2)
+        del_btn = tk.Button(btn_frame, text="Delete Selected", command=lambda: self._delete_selected_task())
+        del_btn.pack(side='left', padx=2)
+        up_btn = tk.Button(btn_frame, text="Move Up", command=lambda: self._move_selected_task(tab_id, -1))
+        up_btn.pack(side='left', padx=2)
+        down_btn = tk.Button(btn_frame, text="Move Down", command=lambda: self._move_selected_task(tab_id, 1))
+        down_btn.pack(side='left', padx=2)
+
+        # Clear completed button (if showing history)
         if self.show_completed:
             clear_btn = tk.Button(frame, text="Clear Completed", command=lambda: self._clear_completed(tab_id))
             clear_btn.pack(side='top', pady=2)
 
-        # Reorder (move up/down)
-        if not self.show_completed:
-            reorder_frame = tk.Frame(frame)
-            reorder_frame.pack(side='top', fill='x')
-            up_btn = tk.Button(reorder_frame, text="Move Up", command=lambda: self._move_task(tab_id, -1))
-            up_btn.pack(side='left')
-            down_btn = tk.Button(reorder_frame, text="Move Down", command=lambda: self._move_task(tab_id, 1))
-            down_btn.pack(side='left')
+    def _delete_selected_task(self):
+        selected = self.tree.selection()
+        if selected:
+            todo_id = int(selected[0])
+            self.controller.delete_todo(todo_id)
+            self._draw_tab_content(self.current_tab_id)
+
+    def _move_selected_task(self, tab_id, direction):
+        selected = self.tree.selection()
+        if not selected:
+            return
+        todo_id = int(selected[0])
+        todos = self.controller.get_todos(tab_id, completed=False)
+        order = [t[0] for t in todos]
+        if todo_id not in order:
+            return
+        idx = order.index(todo_id)
+        new_idx = idx + direction
+        if 0 <= new_idx < len(order):
+            order[idx], order[new_idx] = order[new_idx], order[idx]
+            self.controller.reorder_todos(tab_id, order)
+            # Redraw and reselect the moved item
+            self._draw_tab_content(tab_id)
+            # Reselect the moved item
+            self.tree.selection_set(str(order[new_idx]))
 
     def _add_task(self, entry, tab_id):
         title = entry.get().strip()
