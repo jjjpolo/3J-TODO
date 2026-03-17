@@ -29,6 +29,16 @@ class MainWindow:
         self.tab_control.pack(fill='both', expand=True)
         self._load_tabs()
 
+        # Move Up, Move Down, and Delete Selected buttons in their own frame before tab buttons
+        action_btn_frame = tk.Frame(self.root)
+        action_btn_frame.pack(side='top', pady=2)
+        self.move_up_btn = tk.Button(action_btn_frame, text="Move Up", command=lambda: self._move_selected_task(self.current_tab_id, -1))
+        self.move_up_btn.pack(side='left', padx=2)
+        self.move_down_btn = tk.Button(action_btn_frame, text="Move Down", command=lambda: self._move_selected_task(self.current_tab_id, 1))
+        self.move_down_btn.pack(side='left', padx=2)
+        self.del_selected_btn = tk.Button(action_btn_frame, text="Delete Selected", command=lambda: self._delete_selected_task())
+        self.del_selected_btn.pack(side='left', padx=2)
+
         # Add/Delete tab buttons in a frame
         tab_btn_frame = tk.Frame(self.root)
         tab_btn_frame.pack(side='top', pady=2)
@@ -42,6 +52,7 @@ class MainWindow:
         top_action_frame.pack(side='top', pady=2)
         self.history_btn = tk.Button(top_action_frame, text="See history", command=self._toggle_history)
         self.history_btn.pack(side='left', padx=2)
+        
         self.clear_completed_btn = tk.Button(top_action_frame, text="Clear Completed", command=self._clear_completed_top)
         self.clear_completed_btn.pack(side='left', padx=2)
         self.clear_completed_btn.pack_forget()  # Hide by default
@@ -153,20 +164,36 @@ class MainWindow:
         self.tree.bind("<Delete>", lambda event: self._delete_selected_task())
         # Focus stays on treeview when clicked or navigated
         self.tree.bind("<Button-1>", lambda event: self.tree.focus_set())
-        self.tree.bind("<Up>", lambda event: self.tree.focus_set())
-        self.tree.bind("<Down>", lambda event: self.tree.focus_set())
-
-        # Delete and Move Up/Down buttons on same line
-        btn_frame = tk.Frame(frame)
-        btn_frame.pack(side='top', fill='x', pady=2)
-        tk.Label(btn_frame).pack(side='left', expand=True)  # left spacer
-        up_btn = tk.Button(btn_frame, text="Move Up", command=lambda: self._move_selected_task(tab_id, -1))
-        up_btn.pack(side='left', padx=2)
-        down_btn = tk.Button(btn_frame, text="Move Down", command=lambda: self._move_selected_task(tab_id, 1))
-        down_btn.pack(side='left', padx=2)
-        del_btn = tk.Button(btn_frame, text="Delete Selected", command=lambda: self._delete_selected_task())
-        del_btn.pack(side='left', padx=2)
-        tk.Label(btn_frame).pack(side='left', expand=True)  # right spacer
+        self.tree.bind("<Up>", self._on_tree_up_down)
+        self.tree.bind("<Down>", self._on_tree_up_down)
+        self.tree.bind("<Next>", self._on_tree_page_up_down)
+        self.tree.bind("<Prior>", self._on_tree_page_up_down)
+    def _on_tree_up_down(self, event):
+        tree = self._current_tree
+        selected = tree.selection()
+        all_items = tree.get_children()
+        if not all_items:
+            return
+        if not selected:
+            tree.selection_set(all_items[0])
+            tree.focus_set()
+            return
+        idx = all_items.index(selected[0])
+        if event.keysym == "Up" and idx > 0:
+            tree.selection_set(all_items[idx-1])
+            tree.focus_set()
+        elif event.keysym == "Down" and idx < len(all_items)-1:
+            tree.selection_set(all_items[idx+1])
+            tree.focus_set()
+    def _on_tree_page_up_down(self, event):
+        tree = self._current_tree
+        selected = tree.selection()
+        if not selected:
+            return
+        if event.keysym == "Next":
+            self._move_selected_task(self.current_tab_id, 1)
+        elif event.keysym == "Prior":
+            self._move_selected_task(self.current_tab_id, -1)
 
         # Show or hide the top clear completed button
         if self.clear_completed_btn:
