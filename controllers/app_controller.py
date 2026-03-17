@@ -18,6 +18,9 @@ class AppController:
     def add_tab(self, name):
         self.todo_manager.add_tab(name)
 
+    def delete_tab(self, tab_id):
+        self.todo_manager.delete_tab(tab_id)
+
     # Todo management
     def add_todo(self, title, tab_id):
         self.todo_manager.add_todo(title, tab_id)

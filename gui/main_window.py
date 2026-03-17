@@ -18,13 +18,29 @@ class MainWindow:
         self.tab_control.pack(fill='both', expand=True)
         self._load_tabs()
 
-        # Add tab button
-        add_tab_btn = tk.Button(self.root, text="+ Add Tab", command=self._add_tab_dialog)
-        add_tab_btn.pack(side='top', pady=2)
+        # Add/Delete tab buttons in a frame
+        tab_btn_frame = tk.Frame(self.root)
+        tab_btn_frame.pack(side='top', pady=2)
+        add_tab_btn = tk.Button(tab_btn_frame, text="+ Add Tab", command=self._add_tab_dialog)
+        add_tab_btn.pack(side='left', padx=2)
+        del_tab_btn = tk.Button(tab_btn_frame, text="Delete Tab", command=self._delete_current_tab)
+        del_tab_btn.pack(side='left', padx=2)
 
         # History toggle
         self.history_btn = tk.Button(self.root, text="See history", command=self._toggle_history)
         self.history_btn.pack(side='top', pady=2)
+    def _delete_current_tab(self):
+        if len(self.tabs) <= 1:
+            messagebox.showinfo("Delete Tab", "At least one tab must remain.")
+            return
+        idx = self.tab_control.index(self.tab_control.select())
+        tab_ids = list(self.tabs.keys())
+        if idx < len(tab_ids):
+            tab_id = tab_ids[idx]
+            tab_name = self.tab_control.tab(idx, "text")
+            if messagebox.askyesno("Delete Tab", f"Delete tab '{tab_name}' and all its tasks?"):
+                self.controller.delete_tab(tab_id)
+                self._refresh_tabs()
 
     def _load_tabs(self):
         for tab_id, name in self.controller.get_tabs():
@@ -50,7 +66,9 @@ class MainWindow:
                 self._refresh_tabs()
 
     def _refresh_tabs(self):
-        self.tab_control.forget('all')
+        # Remove all tabs from the notebook
+        for tab_id in self.tab_control.tabs():
+            self.tab_control.forget(tab_id)
         self.tabs.clear()
         self._load_tabs()
 
@@ -110,12 +128,12 @@ class MainWindow:
         # Delete and Move Up/Down buttons on same line
         btn_frame = tk.Frame(frame)
         btn_frame.pack(side='top', fill='x', pady=2)
-        del_btn = tk.Button(btn_frame, text="Delete Selected", command=lambda: self._delete_selected_task())
-        del_btn.pack(side='left', padx=2)
         up_btn = tk.Button(btn_frame, text="Move Up", command=lambda: self._move_selected_task(tab_id, -1))
         up_btn.pack(side='left', padx=2)
         down_btn = tk.Button(btn_frame, text="Move Down", command=lambda: self._move_selected_task(tab_id, 1))
         down_btn.pack(side='left', padx=2)
+        del_btn = tk.Button(btn_frame, text="Delete Selected", command=lambda: self._delete_selected_task())
+        del_btn.pack(side='left', padx=2)
 
         # Clear completed button (if showing history)
         if self.show_completed:

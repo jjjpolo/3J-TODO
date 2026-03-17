@@ -8,10 +8,17 @@ DB_FILE = os.path.join(os.path.dirname(__file__), '../todo.db')
 
 class TodoManager:
     """Handles todo operations and storage using SQLite."""
+
     def __init__(self):
         self.conn = sqlite3.connect(DB_FILE)
         self._create_tables()
         logger.info('TodoManager initialized with SQLite DB.')
+
+    def delete_tab(self, tab_id: int):
+        with self.conn:
+            self.conn.execute('DELETE FROM todos WHERE tab_id=?', (tab_id,))
+            self.conn.execute('DELETE FROM tabs WHERE id=?', (tab_id,))
+        logger.info(f'Tab deleted: {tab_id}')
 
     def _create_tables(self):
         with self.conn:
