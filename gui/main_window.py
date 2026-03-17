@@ -40,12 +40,6 @@ class MainWindow:
         self.move_down_btn.pack(side='left', padx=2)
         self.del_selected_btn = tk.Button(action_btn_frame, text="Delete Selected", command=lambda: self._delete_selected_task())
         self.del_selected_btn.pack(side='left', padx=2)
-        self.expand_btn = tk.Button(action_btn_frame, text="Expand", command=lambda: self._toggle_expand_selected(expand=True))
-        self.expand_btn.pack(side='left', padx=2)
-        self.collapse_btn = tk.Button(action_btn_frame, text="Collapse", command=lambda: self._toggle_expand_selected(expand=False))
-        self.collapse_btn.pack(side='left', padx=2)
-        self.expand_btn.config(state='disabled')
-        self.collapse_btn.config(state='disabled')
         self.mark_done_btn = tk.Button(action_btn_frame, text="Mark Done", command=self._mark_selected_done)
         self.mark_done_btn.pack(side='left', padx=2)
 
@@ -154,19 +148,19 @@ class MainWindow:
             self._expanded_tasks = set()
 
         def insert_task_with_subtasks(todo, parent=""):
-            # Top-level tasks are always expanded.
+            # Top-level tasks follow persisted open-state via tree disclosure.
             is_parent_task = parent == ""
-            expanded = is_parent_task
+            expanded = is_parent_task and (todo.id in self._expanded_tasks)
             expand_icon = ""
             checkbox = "☑" if todo.completed else "☐"
             sub_count = len(getattr(todo, 'subtasks', [])) if is_parent_task else 0
             base_title = f"{todo.title} ({sub_count})" if is_parent_task and sub_count > 0 else todo.title
-            self.tree.insert(parent, "end", iid=str(todo.id), text=base_title, values=(checkbox, todo.position, expand_icon))
+            self.tree.insert(parent, "end", iid=str(todo.id), text=base_title, values=(checkbox, todo.position, expand_icon), open=expanded)
 
-            if is_parent_task and expanded:
+            if is_parent_task:
                 for sub in sorted(getattr(todo, 'subtasks', []), key=lambda t: t.position):
                     insert_task_with_subtasks(sub, parent=str(todo.id))
-                # Inline subtask input row (empty title) shown only when parent is expanded.
+                # Inline subtask input row (visible when parent is open).
                 new_iid = self._new_subtask_iid(todo.id)
                 self.tree.insert(
                     str(todo.id),
@@ -185,6 +179,17 @@ class MainWindow:
                 SimpleNamespace(id=t[0], title=t[1], completed=bool(t[2]), position=t[3], subtasks=[])
                 for t in flat_todos
             ]
+
+        # Initialize and maintain persisted open-state for current parents.
+        parent_ids = {todo.id for todo in todos}
+        if not hasattr(self, '_expanded_initialized'):
+            self._expanded_tasks = set(parent_ids)
+            self._expanded_initialized = True
+        else:
+            existing_open = {pid for pid in self._expanded_tasks if pid in parent_ids}
+            new_parents = parent_ids - existing_open
+            self._expanded_tasks = existing_open | new_parents
+
         for todo in sorted(todos, key=lambda t: t.position):
             insert_task_with_subtasks(todo)
 
@@ -196,6 +201,23 @@ class MainWindow:
             # Keep focus behavior for normal clicks.
             self.tree.focus_set()
         self.tree.bind("<Button-1>", on_tree_click)
+
+        def on_tree_open(event):
+            item = self.tree.focus()
+            if item and self.tree.parent(item) == "":
+                todo_id = self._todo_id_from_iid(item)
+                if todo_id is not None:
+                    self._expanded_tasks.add(todo_id)
+
+        def on_tree_close(event):
+            item = self.tree.focus()
+            if item and self.tree.parent(item) == "":
+                todo_id = self._todo_id_from_iid(item)
+                if todo_id is not None and todo_id in self._expanded_tasks:
+                    self._expanded_tasks.remove(todo_id)
+
+        self.tree.bind("<<TreeviewOpen>>", on_tree_open)
+        self.tree.bind("<<TreeviewClose>>", on_tree_close)
 
         # Double-click behavior: expand/collapse parent task or activate inline subtask input.
         def on_double_click(event):
@@ -236,10 +258,6 @@ class MainWindow:
         if values and values[0] == "☐":
             self.controller.mark_completed(todo_id)
             self._draw_tab_content(self.current_tab_id)
-
-    def _toggle_expand_selected(self, expand=None):
-        # Expand/collapse is disabled: tree is always expanded.
-        return
 
     def _on_tree_up_down(self, event):
         tree = self._current_tree
