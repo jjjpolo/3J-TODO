@@ -1,6 +1,7 @@
 
 import tkinter as tk
 from tkinter import ttk, simpledialog, messagebox
+from types import SimpleNamespace
 
 class MainWindow:
     def __init__(self, controller):
@@ -12,6 +13,7 @@ class MainWindow:
         self.show_completed = False
         # Pre-create clear_completed_btn to avoid AttributeError
         self.clear_completed_btn = None
+        self._subtask_editor = None
         self._setup_ui()
         self._center_window()
 
@@ -38,6 +40,12 @@ class MainWindow:
         self.move_down_btn.pack(side='left', padx=2)
         self.del_selected_btn = tk.Button(action_btn_frame, text="Delete Selected", command=lambda: self._delete_selected_task())
         self.del_selected_btn.pack(side='left', padx=2)
+        self.expand_btn = tk.Button(action_btn_frame, text="Expand", command=lambda: self._toggle_expand_selected(expand=True))
+        self.expand_btn.pack(side='left', padx=2)
+        self.collapse_btn = tk.Button(action_btn_frame, text="Collapse", command=lambda: self._toggle_expand_selected(expand=False))
+        self.collapse_btn.pack(side='left', padx=2)
+        self.mark_done_btn = tk.Button(action_btn_frame, text="Mark Done", command=self._mark_selected_done)
+        self.mark_done_btn.pack(side='left', padx=2)
 
         # Add/Delete tab buttons in a frame
         tab_btn_frame = tk.Frame(self.root)
@@ -126,48 +134,159 @@ class MainWindow:
         self._current_entry = entry
         self._current_tree = None
 
-        # Task list as table
-        todos = self.controller.get_todos(tab_id, completed=self.show_completed)
-        columns = ("completed", "title", "position")
-        self.tree = ttk.Treeview(frame, columns=columns, show="headings", selectmode="browse", height=10)
+        # Task list as table with expandable/collapsible subtasks
+        # Use tree+headings so parent/child rows are actually rendered hierarchically.
+        columns = ("completed", "position", "expand")
+        self.tree = ttk.Treeview(frame, columns=columns, show="tree headings", selectmode="browse", height=16)
+        self.tree.heading("#0", text="Task")
         self.tree.heading("completed", text="Done")
-        if self.show_completed:
-            self.tree.heading("title", text="Completed task")
-        else:
-            self.tree.heading("title", text="Task")
         self.tree.heading("position", text="Pos")
+        self.tree.heading("expand", text="")
+        self.tree.column("#0", width=220)
         self.tree.column("completed", width=60, anchor="center")
-        self.tree.column("title", width=250)
         self.tree.column("position", width=40, anchor="center")
+        self.tree.column("expand", width=30, anchor="center")
 
-        # Insert tasks
-        for todo_id, title, completed, position in todos:
-            checkbox = "☑" if completed else "☐"
-            self.tree.insert("", "end", iid=str(todo_id), values=(checkbox, title, position))
+        # Track expanded/collapsed state
+        if not hasattr(self, '_expanded_tasks'):
+            self._expanded_tasks = set()
 
+        def insert_task_with_subtasks(todo, parent=""):
+            # Top-level tasks are always expandable to allow inline subtask input.
+            is_parent_task = parent == ""
+            expanded = todo.id in self._expanded_tasks
+            expand_icon = "-" if is_parent_task and expanded else ("+" if is_parent_task else "")
+            checkbox = "☑" if todo.completed else "☐"
+            sub_count = len(getattr(todo, 'subtasks', [])) if is_parent_task else 0
+            base_title = f"{todo.title} ({sub_count})" if is_parent_task and sub_count > 0 else todo.title
+            self.tree.insert(parent, "end", iid=str(todo.id), text=base_title, values=(checkbox, todo.position, expand_icon))
+
+            if is_parent_task and expanded:
+                for sub in sorted(getattr(todo, 'subtasks', []), key=lambda t: t.position):
+                    insert_task_with_subtasks(sub, parent=str(todo.id))
+                # Inline subtask input row (empty title) shown only when parent is expanded.
+                new_iid = self._new_subtask_iid(todo.id)
+                self.tree.insert(
+                    str(todo.id),
+                    "end",
+                    iid=new_iid,
+                    text="",
+                    values=("", "", "")
+                )
+
+        # Get all top-level tasks; fallback to flat tasks when subtask API is not available yet.
+        if hasattr(self.controller, 'get_todos_with_subtasks'):
+            todos = self.controller.get_todos_with_subtasks(tab_id, completed=self.show_completed)
+        else:
+            flat_todos = self.controller.get_todos(tab_id, completed=self.show_completed)
+            todos = [
+                SimpleNamespace(id=t[0], title=t[1], completed=bool(t[2]), position=t[3], subtasks=[])
+                for t in flat_todos
+            ]
+        for todo in sorted(todos, key=lambda t: t.position):
+            insert_task_with_subtasks(todo)
 
         self.tree.pack(side="top", fill="x", padx=5, pady=5)
         self._current_tree = self.tree
 
-        # Double-click to toggle completion
+        # Bind expand/collapse on expand column click
+        def on_tree_click(event):
+            region = self.tree.identify("region", event.x, event.y)
+            # Keep focus behavior for normal clicks.
+            self.tree.focus_set()
+            if region == "cell":
+                col = self.tree.identify_column(event.x)
+                if col == "#3":  # expand column
+                    item = self.tree.identify_row(event.y)
+                    if item:
+                        todo_id = self._todo_id_from_iid(item)
+                        if todo_id is None:
+                            return
+                        if todo_id in self._expanded_tasks:
+                            self._expanded_tasks.remove(todo_id)
+                        else:
+                            self._expanded_tasks.add(todo_id)
+                        self._draw_tab_content(tab_id)
+        self.tree.bind("<Button-1>", on_tree_click)
+
+        # Double-click behavior: expand/collapse parent task or activate inline subtask input.
         def on_double_click(event):
             item = self.tree.identify_row(event.y)
-            if item:
-                todo_id = int(item)
-                # Only allow marking as completed if not already
-                values = self.tree.item(item, "values")
-                if values[0] == "☐":
-                    self.controller.mark_completed(todo_id)
-                    self._draw_tab_content(tab_id)
+            if not item:
+                return
+
+            # Inline subtask entry row.
+            if self._is_new_subtask_iid(item):
+                parent_id = self._parent_id_from_new_iid(item)
+                if parent_id is not None:
+                    self._show_subtask_inline_entry(item, parent_id)
+                return
+
+            # Parent task toggles expand/collapse on double-click.
+            parent = self.tree.parent(item)
+            if parent == "":
+                todo_id = self._todo_id_from_iid(item)
+                if todo_id is None:
+                    return
+                if todo_id in self._expanded_tasks:
+                    self._expanded_tasks.remove(todo_id)
+                else:
+                    self._expanded_tasks.add(todo_id)
+                self._draw_tab_content(tab_id)
         self.tree.bind("<Double-1>", on_double_click)
         # Bind Delete (Supr) key to delete selected task
         self.tree.bind("<Delete>", lambda event: self._delete_selected_task())
         # Focus stays on treeview when clicked or navigated
-        self.tree.bind("<Button-1>", lambda event: self.tree.focus_set())
         self.tree.bind("<Up>", self._on_tree_up_down)
         self.tree.bind("<Down>", self._on_tree_up_down)
         self.tree.bind("<Next>", self._on_tree_page_up_down)
         self.tree.bind("<Prior>", self._on_tree_page_up_down)
+        self.tree.bind("<space>", self._on_tree_space)
+
+    def _on_tree_space(self, event):
+        self._mark_selected_done()
+        return "break"
+
+    def _mark_selected_done(self):
+        if not self._current_tree:
+            return
+        selected = self._current_tree.selection()
+        if not selected:
+            return
+        todo_id = self._todo_id_from_iid(selected[0])
+        if todo_id is None:
+            return
+        values = self._current_tree.item(selected[0], "values")
+        if values and values[0] == "☐":
+            self.controller.mark_completed(todo_id)
+            self._draw_tab_content(self.current_tab_id)
+
+    def _toggle_expand_selected(self, expand=None):
+        if not self._current_tree:
+            return
+        selected = self._current_tree.selection()
+        if not selected:
+            return
+        values = self._current_tree.item(selected[0], "values")
+        # If row has no expand icon, it has no subtasks.
+        if not values or values[2] == "":
+            return
+        todo_id = self._todo_id_from_iid(selected[0])
+        if todo_id is None:
+            return
+        if not hasattr(self, '_expanded_tasks'):
+            self._expanded_tasks = set()
+        if expand is True:
+            self._expanded_tasks.add(todo_id)
+        elif expand is False:
+            self._expanded_tasks.discard(todo_id)
+        else:
+            if todo_id in self._expanded_tasks:
+                self._expanded_tasks.remove(todo_id)
+            else:
+                self._expanded_tasks.add(todo_id)
+        self._draw_tab_content(self.current_tab_id)
+
     def _on_tree_up_down(self, event):
         tree = self._current_tree
         selected = tree.selection()
@@ -209,8 +328,10 @@ class MainWindow:
     def _delete_selected_task(self):
         selected = self.tree.selection()
         if selected:
-            todo_id = int(selected[0])
-            task_title = self.tree.item(selected[0], 'values')[1]
+            todo_id = self._todo_id_from_iid(selected[0])
+            if todo_id is None:
+                return
+            task_title = self.tree.item(selected[0], 'text')
             if messagebox.askyesno("Delete Task", f"Delete task '{task_title}'?"):
                 # Find which item should be selected after deletion
                 all_items = self.tree.get_children()
@@ -242,24 +363,93 @@ class MainWindow:
         selected = self.tree.selection()
         if not selected:
             return
-        todo_id = int(selected[0])
-        todos = self.controller.get_todos(tab_id, completed=False)
-        order = [t[0] for t in todos]
-        if todo_id not in order:
+        selected_iid = selected[0]
+        todo_id = self._todo_id_from_iid(selected_iid)
+        if todo_id is None:
             return
-        idx = order.index(todo_id)
-        new_idx = idx + direction
-        if 0 <= new_idx < len(order):
-            order[idx], order[new_idx] = order[new_idx], order[idx]
-            self.controller.reorder_todos(tab_id, order)
-            # Redraw and reselect the moved item
-            self._draw_tab_content(tab_id)
-            # Reselect and refocus the moved item
-            moved_id = str(order[new_idx])
-            tree = self._current_tree
-            if tree and moved_id in tree.get_children():
+        moved = False
+        if hasattr(self.controller, 'move_todo_hierarchy'):
+            moved = self.controller.move_todo_hierarchy(todo_id, direction)
+
+        if not moved:
+            return
+
+        # Keep expanded state of current parent where possible and restore selection.
+        parent_iid = self.tree.parent(selected_iid)
+        if parent_iid and self._todo_id_from_iid(parent_iid) is not None:
+            if not hasattr(self, '_expanded_tasks'):
+                self._expanded_tasks = set()
+            self._expanded_tasks.add(int(parent_iid))
+
+        self._draw_tab_content(tab_id)
+        tree = self._current_tree
+        moved_id = str(todo_id)
+        if tree and tree.exists(moved_id):
+            # If moved item became a subtask, auto-expand its new parent and redraw.
+            new_parent_iid = tree.parent(moved_id)
+            if new_parent_iid and self._todo_id_from_iid(new_parent_iid) is not None:
+                if not hasattr(self, '_expanded_tasks'):
+                    self._expanded_tasks = set()
+                self._expanded_tasks.add(int(new_parent_iid))
+                self._draw_tab_content(tab_id)
+                tree = self._current_tree
+            if tree and tree.exists(moved_id):
                 tree.selection_set(moved_id)
                 tree.focus_set()
+
+    def _todo_id_from_iid(self, iid):
+        try:
+            return int(iid)
+        except (TypeError, ValueError):
+            return None
+
+    def _new_subtask_iid(self, parent_id):
+        return f"new_subtask:{parent_id}"
+
+    def _is_new_subtask_iid(self, iid):
+        return isinstance(iid, str) and iid.startswith("new_subtask:")
+
+    def _parent_id_from_new_iid(self, iid):
+        if not self._is_new_subtask_iid(iid):
+            return None
+        try:
+            return int(iid.split(":", 1)[1])
+        except (IndexError, ValueError):
+            return None
+
+    def _show_subtask_inline_entry(self, row_iid, parent_id):
+        if self._subtask_editor is not None:
+            self._subtask_editor.destroy()
+            self._subtask_editor = None
+
+        bbox = self.tree.bbox(row_iid, "#0")
+        if not bbox:
+            return
+
+        x, y, width, height = bbox
+        entry = tk.Entry(self.tree)
+        entry.place(x=x, y=y, width=width, height=height)
+        entry.focus_set()
+        self._subtask_editor = entry
+
+        def submit_subtask(event=None):
+            title = entry.get().strip()
+            entry.destroy()
+            self._subtask_editor = None
+            if not title:
+                return
+            self.controller.add_todo(title, self.current_tab_id, parent_id=parent_id)
+            self._expanded_tasks.add(parent_id)
+            self._draw_tab_content(self.current_tab_id)
+
+        def cancel_subtask(event=None):
+            if self._subtask_editor is not None:
+                self._subtask_editor.destroy()
+                self._subtask_editor = None
+
+        entry.bind("<Return>", submit_subtask)
+        entry.bind("<Escape>", cancel_subtask)
+        entry.bind("<FocusOut>", submit_subtask)
 
     def _add_task(self, entry, tab_id):
         title = entry.get().strip()

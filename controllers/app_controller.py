@@ -22,11 +22,14 @@ class AppController:
         self.todo_manager.delete_tab(tab_id)
 
     # Todo management
-    def add_todo(self, title, tab_id):
-        self.todo_manager.add_todo(title, tab_id)
+    def add_todo(self, title, tab_id, parent_id=None):
+        self.todo_manager.add_todo(title, tab_id, parent_id)
 
     def get_todos(self, tab_id, completed=False):
         return self.todo_manager.get_todos(tab_id, completed)
+
+    def get_todos_with_subtasks(self, tab_id, completed=False):
+        return self.todo_manager.get_todos_with_subtasks(tab_id, completed)
 
     def mark_completed(self, todo_id):
         self.todo_manager.mark_completed(todo_id)
@@ -36,6 +39,12 @@ class AppController:
 
     def reorder_todos(self, tab_id, new_order):
         self.todo_manager.reorder_todos(tab_id, new_order)
+
+    def reorder_subtasks(self, parent_id, new_order):
+        self.todo_manager.reorder_subtasks(parent_id, new_order)
+
+    def move_todo_hierarchy(self, todo_id, direction):
+        return self.todo_manager.move_todo_hierarchy(todo_id, direction)
 
     def clear_completed(self, tab_id):
         self.todo_manager.clear_completed(tab_id)
